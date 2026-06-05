@@ -1,8 +1,6 @@
 //! A solver that uses [clarabel](https://oxfordcontrol.github.io/ClarabelDocs/stable/), a pure rust solver.
 
 use crate::affine_expression_trait::IntoAffineExpression;
-#[cfg(feature = "enable_quadratic")]
-use crate::expression::Expression;
 use crate::expression::LinearExpression;
 #[cfg(feature = "enable_quadratic")]
 use crate::expression::VariablePair;
@@ -244,6 +242,7 @@ struct CscMatrixBuilder {
     nzval: Vec<Vec<f64>>,
     n_rows: usize,
     n_cols: usize,
+    #[cfg(feature = "enable_quadratic")]
     is_quadratic: bool,
 }
 
@@ -254,6 +253,7 @@ impl CscMatrixBuilder {
             nzval: vec![Vec::new(); n_cols],
             n_rows: 0,
             n_cols,
+            #[cfg(feature = "enable_quadratic")]
             is_quadratic: false,
         }
     }
@@ -301,6 +301,8 @@ impl CscMatrixBuilder {
         }
     }
 
+    // `mut self` is only required for the quadratic column-sorting pass below.
+    #[cfg_attr(not(feature = "enable_quadratic"), allow(unused_mut))]
     fn build(mut self) -> clarabel::algebra::CscMatrix {
         // For quadratic matrices, sort columns to maintain proper CSC format
         #[cfg(feature = "enable_quadratic")]
@@ -385,7 +387,7 @@ mod tests {
     #[cfg(feature = "enable_quadratic")]
     mod quadratic_tests {
         use super::*;
-        use crate::VariablePair;
+        use crate::{Expression, VariablePair};
 
         #[test]
         fn test_csc_quadratic_matrix_builder_diagonal() {

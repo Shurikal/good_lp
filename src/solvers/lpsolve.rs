@@ -35,14 +35,16 @@ fn col_num(var: Variable) -> c_int {
 /// The [lp_solve](http://lpsolve.sourceforge.net/5.5/) open-source solver library.
 /// lp_solve is released under the LGPL license.
 pub fn lp_solve(to_solve: UnsolvedProblem) -> LpSolveProblem {
-    #[cfg(feature = "enable_quadratic")]
-    panic!("lp_solve does not support quadratic objectives");
-
     let UnsolvedProblem {
         objective,
         direction,
         variables,
     } = to_solve;
+
+    #[cfg(feature = "enable_quadratic")]
+    if !objective.is_affine() {
+        panic!("lp_solve does not support quadratic objectives");
+    }
 
     // It looks like the lp_solve rust binding doesn't expose the set_maxim function
     let objective = if direction == ObjectiveDirection::Minimisation {

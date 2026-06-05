@@ -511,7 +511,27 @@ impl ProblemVariables {
         objective: E,
     ) -> UnsolvedProblem {
         let objective = Expression::from_other_quadratic(objective);
-        // todo, correct assert check
+        // Every variable referenced in the objective (in either a linear or a
+        // quadratic term) must belong to this problem. A count-based check like
+        // the one in `optimise` is not sufficient here: a purely quadratic
+        // objective has no linear coefficients, yet may still reference
+        // out-of-bounds variables through its quadratic terms.
+        let n_variables = self.variables.len();
+        let linear_in_bounds = objective
+            .linear
+            .coefficients
+            .keys()
+            .all(|var| var.index() < n_variables);
+        let quadratic_in_bounds = objective
+            .quadratic
+            .coefficients
+            .keys()
+            .all(|pair| pair.var1.index() < n_variables && pair.var2.index() < n_variables);
+        assert!(
+            linear_in_bounds && quadratic_in_bounds,
+            "The objective function references variables that do not belong to this problem. \
+            You probably used variables from a different problem in this one."
+        );
         UnsolvedProblem {
             objective,
             direction,

@@ -32,9 +32,12 @@ For a more complex example, see the [resource allocation problem](https://github
 
 ## Features and limitations
 
-- **Linear programming**. This crate currently supports only the definition of linear programs. You cannot use it with
-  quadratic functions. For instance:
+- **Linear programming**. By default, this crate supports only the definition of linear programs:
   you can maximise `3 * x + y`, but not `3 * x * y`.
+- **Quadratic programming** *(optional)*. When the `enable_quadratic` cargo feature is enabled, objectives
+  may also contain quadratic terms (for instance `x * x` or `x * y`). Quadratic objectives are currently
+  only solved by the [`clarabel`](#clarabel) solver; constraints must still be linear. See
+  [quadratic programming](#quadratic-programming) below.
 - **Continuous and integer variables**. good_lp itself supports mixed integer-linear programming (MILP),
   but not all underlying solvers support integer variables. (see also [variable types](#variable-types))
 - **Not a solver**. This crate uses other rust crates to provide the solvers.
@@ -209,6 +212,46 @@ It does implement the [SolutionWithDual](https://docs.rs/good_lp/latest/good_lp/
 trait, which allows you to access the dual values of the constraints (the shadow prices).
 
 [clarabel]: https://github.com/oxfordcontrol/Clarabel.rs
+
+## Quadratic programming
+
+By default `good_lp` only models linear programs. Enabling the optional `enable_quadratic`
+feature additionally lets the **objective** function contain quadratic terms:
+
+```toml
+good_lp = { version = "*", features = ["enable_quadratic"], default-features = false }
+```
+
+The `enable_quadratic` feature pulls in the [`clarabel`](#clarabel) solver, which is currently
+the only solver able to optimise quadratic objectives. Constraints must still be linear.
+
+You can build a quadratic objective either with the `*` operator on variables and expressions,
+or explicitly with `Expression::add_quadratic_term`:
+
+```rust
+use good_lp::{clarabel, variables, Expression, Solution, SolverModel};
+
+variables! { vars: x; y; }
+
+// minimise x² + y²  subject to  x + y >= 4
+let mut objective = Expression::default();
+objective.add_quadratic_term(x, x, 1.0);
+objective.add_quadratic_term(y, y, 1.0);
+
+let solution = vars
+    .minimise(objective)
+    .using(clarabel)
+    .with((x + y).geq(4.0))
+    .solve()
+    .unwrap();
+
+// the closest point to the origin on the line x + y = 4 is (2, 2)
+assert!((solution.value(x) - 2.0).abs() < 1e-3);
+assert!((solution.value(y) - 2.0).abs() < 1e-3);
+```
+
+Passing a quadratic objective to a solver that only supports linear programs (such as
+`coin_cbc`, `microlp` or `lpsolve`) will panic.
 
 ## Variable types
 
