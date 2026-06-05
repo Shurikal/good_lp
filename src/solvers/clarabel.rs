@@ -5,16 +5,16 @@ use crate::expression::LinearExpression;
 #[cfg(feature = "enable_quadratic")]
 use crate::expression::VariablePair;
 use crate::variable::UnsolvedProblem;
+use crate::{Constraint, DualValues, SolutionWithDual, Variable};
 use crate::{
+    SolutionStatus,
     constraint::ConstraintReference,
     solvers::{ObjectiveDirection, ResolutionError, Solution, SolverModel},
-    SolutionStatus,
 };
-use crate::{Constraint, DualValues, SolutionWithDual, Variable};
 
 use clarabel::algebra::CscMatrix;
-use clarabel::solver::implementations::default::DefaultSettingsBuilder;
 use clarabel::solver::SupportedConeT::{self, *};
+use clarabel::solver::implementations::default::DefaultSettingsBuilder;
 use clarabel::solver::{DefaultSolution, SolverStatus};
 use clarabel::solver::{DefaultSolver, IPSolver};
 
@@ -22,46 +22,41 @@ use clarabel::solver::{DefaultSolver, IPSolver};
 /// to be used with [UnsolvedProblem::using].
 /// Automatically handles both linear and quadratic objectives.
 pub fn clarabel(to_solve: UnsolvedProblem) -> ClarabelProblem {
-    let coef = if to_solve.direction == ObjectiveDirection::Maximisation {
+    let UnsolvedProblem {
+        objective,
+        direction,
+        variables,
+    } = to_solve;
+    let coef = if direction == ObjectiveDirection::Maximisation {
         -1.
     } else {
         1.
     };
-
-    let objective = to_solve.objective;
-
-    // Now we can safely move the other fields
-    let variables = to_solve.variables;
-
     let mut objective_vector = vec![0.; variables.len()];
 
-    // Handle quadratic case
+    // With the `enable_quadratic` feature a non-affine objective also contributes a
+    // quadratic matrix; otherwise (or when the feature is disabled) only the linear
+    // coefficients are used, exactly as in the base solver.
     #[cfg(feature = "enable_quadratic")]
-    let quadratic_matrix_builder = if !objective.is_affine() {
-        // Use quadratic objective coefficients
-        for (var, obj_coeff) in objective.linear.coefficients {
+    let quadratic_matrix_builder = if objective.is_affine() {
+        for (var, obj) in objective.linear_coefficients() {
+            objective_vector[var.index()] = obj * coef;
+        }
+        None
+    } else {
+        for (&var, &obj_coeff) in &objective.linear.coefficients {
             objective_vector[var.index()] = obj_coeff * coef;
         }
-
         let mut qmb = CscMatrixBuilder::new_square(variables.len());
         for (&pair, &quad_coeff) in &objective.quadratic.coefficients {
             qmb.add_quadratic_term(pair, quad_coeff * coef);
         }
         Some(qmb)
-    } else {
-        // Use linear objective coefficients
-        for (var, obj) in objective.linear_coefficients() {
-            objective_vector[var.index()] = obj * coef;
-        }
-        None
     };
 
-    // Handle linear-only case (when quadratic features are disabled)
     #[cfg(not(feature = "enable_quadratic"))]
-    {
-        for (var, obj) in objective.linear_coefficients() {
-            objective_vector[var.index()] = obj * coef;
-        }
+    for (var, obj) in objective.linear_coefficients() {
+        objective_vector[var.index()] = obj * coef;
     }
 
     let constraints_matrix_builder = CscMatrixBuilder::new(variables.len());
@@ -112,33 +107,45 @@ impl ClarabelProblem {
         &mut self.settings
     }
 
-    /// Convert the problem into a clarabel solver
-    /// panics if the problem is not valid
+    /// Convert the problem into a clarabel solver.
+    /// Panics if the problem is not valid.
     pub fn into_solver(self) -> DefaultSolver<f64> {
-        let settings = self.settings.build().expect("Invalid clarabel settings");
+        self.try_into_solver()
+            .expect("Invalid clarabel problem. This is likely a bug in good_lp. Problems should always have coherent dimensions.")
+    }
+
+    /// Convert the problem into a clarabel solver.
+    pub fn try_into_solver(self) -> Result<DefaultSolver<f64>, ResolutionError> {
+        let settings = self
+            .settings
+            .build()
+            .map_err(|e| ResolutionError::Str(format!("Invalid clarabel settings: {e}")))?;
 
         #[cfg(feature = "enable_quadratic")]
-        let quadratic_objective = if let Some(qmb) = self.quadratic_matrix_builder {
-            qmb.build()
-        } else {
-            CscMatrix::zeros((self.variables, self.variables))
+        let quadratic_objective = match self.quadratic_matrix_builder {
+            Some(qmb) => qmb.build(),
+            None => CscMatrix::zeros((self.variables, self.variables)),
         };
+        #[cfg(feature = "enable_quadratic")]
+        let quadratic_objective = &quadratic_objective;
 
         #[cfg(not(feature = "enable_quadratic"))]
-        let quadratic_objective = CscMatrix::zeros((self.variables, self.variables));
+        let quadratic_objective = &CscMatrix::zeros((self.variables, self.variables));
 
         let objective = &self.objective;
         let constraints = &self.constraints_matrix_builder.build();
         let constraint_values = &self.constraint_values;
         let cones = &self.cones;
+
         DefaultSolver::new(
-            &quadratic_objective,
+            quadratic_objective,
             objective,
             constraints,
             constraint_values,
             cones,
             settings,
-        ).expect("Invalid clarabel problem. This is likely a bug in good_lp. Problems should always have coherent dimensions.")
+        )
+        .map_err(|error| ResolutionError::Str(error.to_string()))
     }
 }
 
@@ -147,11 +154,10 @@ impl SolverModel for ClarabelProblem {
     type Error = ResolutionError;
 
     fn solve(self) -> Result<Self::Solution, Self::Error> {
-        let mut solver = self.into_solver();
+        let mut solver = self.try_into_solver()?;
         solver.solve();
         match solver.solution.status {
-            e @ (SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible) => {
-                eprintln!("Clarabel error: {:?}", e);
+            SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible => {
                 Err(ResolutionError::Infeasible)
             }
             SolverStatus::Solved

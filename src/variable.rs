@@ -9,9 +9,9 @@ use std::iter::{FromIterator, repeat_n};
 use std::ops::{Div, Mul, Neg, Not, RangeBounds};
 
 #[cfg(feature = "enable_quadratic")]
-use crate::expression::QuadraticExpression;
-#[cfg(feature = "enable_quadratic")]
 use crate::IntoQuadraticExpression;
+#[cfg(feature = "enable_quadratic")]
+use crate::expression::QuadraticExpression;
 
 use fnv::FnvHashMap as HashMap;
 
@@ -681,12 +681,6 @@ impl UnsolvedProblem {
     /// Create a solver instance and feed it with this problem
     pub fn using<S: Solver>(self, mut solver: S) -> S::Model {
         solver.create_model(self)
-    }
-
-    /// Check if this problem has quadratic terms
-    #[cfg(feature = "enable_quadratic")]
-    pub fn is_quadratic(&self) -> bool {
-        !self.objective.is_affine()
     }
 }
 

@@ -3,7 +3,7 @@
 
 #[cfg(all(feature = "clarabel", feature = "enable_quadratic"))]
 mod quadratic_integration_tests {
-    use good_lp::{clarabel, variables, Expression, ResolutionError, Solution, SolverModel};
+    use good_lp::{Expression, ResolutionError, Solution, SolverModel, clarabel, variables};
 
     #[test]
     fn test_constrained_quadratic_with_bounds() {
